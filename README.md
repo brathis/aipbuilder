@@ -26,8 +26,6 @@ of the generated dataset.
   Or even better, by generating GeoTIFF? Either way, it shouldn't be too hard, as all VACs are in 1:100'000 and show a square area of 12 km by 12 km.
   Since they are also north-oriented, all we need is a single pixel coordinate per chart.
   Use this to add approach sectors for uncontrolled fields.
-- Add CTA and FIR boundaries. Even though they are supposed to follow the Swiss border for the most part, sometimes they do not.
-  If we're lucky, we can get some info on this from BAZL.
 - Add VFR reporting points for controlled fields.
 - Add airports.
 - Add navaids.

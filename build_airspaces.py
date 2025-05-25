@@ -92,7 +92,7 @@ class CircleInputGeometry(InputGeometry):
 
 
 class BorderInputGeometry(InputGeometry):
-    PATTERN = r"^BORDER\((?P<borderName>[A-Z]+)(?P<invert>, I)?(?P<reverse>, R)?\)$"
+    PATTERN = r"^BORDER\((?P<borderName>[A-Z\+]+)(?P<invert>, I)?(?P<reverse>, R)?\)$"
     REGEX = re.compile(PATTERN)
 
     @classmethod

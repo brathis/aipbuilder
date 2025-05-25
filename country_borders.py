@@ -20,10 +20,11 @@ class CountryBordersConfig:
 def get_country_borders(config: CountryBordersConfig) -> geopandas.GeoDataFrame:
     gdf = geopandas.GeoDataFrame(
         {
-            "country": ["CH", "LI", "DE"],
+            "country": ["CH", "LI", "CH+LI", "DE"],
             "geometry": [
                 _get_country_border_ch(config),
                 _get_country_border_li(config),
+                _get_country_border_ch_li(config),
                 _get_country_border_de(config),
             ],
         },
@@ -123,6 +124,16 @@ def _get_country_border_li(config: CountryBordersConfig) -> shapely.LineString:
     return shapely.force_2d(polygon_li.boundary)
 
 
+def _get_country_border_ch_li(config: CountryBordersConfig) -> shapely.LineString:
+    # The outer border of the union of Switzerland and Liechtenstein (needed for CTA/FIR boundaries)
+    border_ch = _get_country_border_ch(config)
+    border_li = _get_country_border_li(config)
+    inner_border = shapely.intersection(border_ch, border_li)
+    outer_and_inner_border = shapely.union(border_ch, border_li)
+    outer_border = shapely.difference(outer_and_inner_border, inner_border)
+    return _flatten_multi_linestring(outer_border)
+
+
 def _get_country_border_de(config: CountryBordersConfig) -> shapely.LineString:
     gdf_country_borders_eu = _load_eu_boundaries(config.eu_boundaries_path)
     return (
@@ -144,3 +155,10 @@ def _load_swissboundaries(path: str) -> geopandas.GeoDataFrame:
 @functools.lru_cache
 def _load_eu_boundaries(path: str) -> geopandas.GeoDataFrame:
     return geopandas.read_file(path)
+
+
+def _flatten_multi_linestring(mls: shapely.MultiLineString) -> shapely.LineString:
+    coords = []
+    for linestring in mls.geoms:
+        coords.extend(linestring.coords)
+    return shapely.LineString(coords)
