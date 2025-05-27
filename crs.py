@@ -1,5 +1,11 @@
 import pyproj
 
+__all__ = [
+    "CRS_WGS84",
+    "CRS_LV95",
+    "P_LV95",
+]
+
 # https://epsg.io/4326
 CRS_WGS84 = pyproj.CRS.from_authority("epsg", "4326")
 

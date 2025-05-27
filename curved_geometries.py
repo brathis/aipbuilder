@@ -24,7 +24,7 @@ def arc_around_point(
     start_lv95 = P_LV95(*start_wgs84)
     end_lv95 = P_LV95(*end_wgs84)
     radius_m = _nm_to_m(radius_nm)
-    points_metric = arc_around_point_grid_metric(
+    points_metric = _arc_around_point_grid_metric(
         center_lv95,
         start_lv95,
         end_lv95,
@@ -38,7 +38,7 @@ def arc_around_point(
     ]
 
 
-def arc_around_point_grid_metric(
+def _arc_around_point_grid_metric(
     center_lv95,
     start_lv95,
     end_lv95,
@@ -65,7 +65,7 @@ def arc_around_point_grid_metric(
 def circle_around_point(center_wgs84, radius_nm, intermediate_points):
     center_lv95 = P_LV95(*center_wgs84)
     radius_m = _nm_to_m(radius_nm)
-    points_metric = circle_around_point_grid_metric(
+    points_metric = _circle_around_point_grid_metric(
         center_lv95, radius_m, intermediate_points
     )
     return [
@@ -74,7 +74,7 @@ def circle_around_point(center_wgs84, radius_nm, intermediate_points):
     ]
 
 
-def circle_around_point_grid_metric(center_lv95, radius_m, intermediate_points):
+def _circle_around_point_grid_metric(center_lv95, radius_m, intermediate_points):
     azimuth_increment_rad = 2 * math.pi / intermediate_points
     azimuth_rad = 0
     points = []

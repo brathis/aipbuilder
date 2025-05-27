@@ -1,28 +1,26 @@
 import csv
-import enum
 import logging
 import re
-from typing import Any, Dict, List, Protocol, Tuple
+from typing import Any, Dict, List, Tuple
 
 import geopandas
 import shapely
-import shapely.ops
-from shapely import MultiLineString, LineString, Polygon
+from shapely import Polygon
 
 from country_borders import get_border_segment
+from crs import CRS_WGS84
 from curved_geometries import arc_around_point, circle_around_point
 from dms_to_decimal import dms_string_to_decimal, dms_to_decimal, is_valid_dms_format
+from providers import BorderProvider, ProviderToken
+
+
+__all__ = [
+    "parse_geometry_definition_file",
+    "parse_vfr_reporting_points",
+]
 
 
 log = logging.getLogger(__name__)
-
-
-class ProviderToken(enum.Enum):
-    BORDER_PROVIDER = 0
-
-
-class BorderProvider(Protocol):
-    def get_border(border_name: str) -> MultiLineString: ...
 
 
 class InputGeometry:
@@ -53,8 +51,9 @@ class VertexInputGeometry(InputGeometry):
 
 
 class ArcInputGeometry(InputGeometry):
-    PATTERN = r"^ARC\((?P<center>[\d NSEW/\.]+), (?P<radiusNm>[\d\.]+), (?P<direction>cw|ccw)\)$"
-    REGEX = re.compile(PATTERN)
+    REGEX = re.compile(
+        r"^ARC\((?P<center>[\d NSEW/\.]+), (?P<radiusNm>[\d\.]+), (?P<direction>cw|ccw)\)$"
+    )
 
     @classmethod
     def matches(cls, definition):
@@ -73,8 +72,7 @@ class ArcInputGeometry(InputGeometry):
 
 
 class CircleInputGeometry(InputGeometry):
-    PATTERN = r"^CIRCLE\((?P<center>[\d NSEW/]+), (?P<radiusNm>[\d\.]+)\)$"
-    REGEX = re.compile(PATTERN)
+    REGEX = re.compile(r"^CIRCLE\((?P<center>[\d NSEW/]+), (?P<radiusNm>[\d\.]+)\)$")
 
     @classmethod
     def matches(cls, definition):
@@ -92,8 +90,9 @@ class CircleInputGeometry(InputGeometry):
 
 
 class BorderInputGeometry(InputGeometry):
-    PATTERN = r"^BORDER\((?P<borderName>[A-Z\+]+)(?P<invert>, I)?(?P<reverse>, R)?\)$"
-    REGEX = re.compile(PATTERN)
+    REGEX = re.compile(
+        r"^BORDER\((?P<borderName>[A-Z\+]+)(?P<invert>, I)?(?P<reverse>, R)?\)$"
+    )
 
     @classmethod
     def matches(cls, definition):
@@ -119,20 +118,6 @@ class BorderInputGeometry(InputGeometry):
     def can_process(cls, previous, subsequent):
         return previous is not None and subsequent is not None
 
-    @classmethod
-    def _find_segment_along_border(
-        cls,
-        entry_point: shapely.Point,
-        exit_point: shapely.Point,
-        border: shapely.MultiLineString,
-    ) -> LineString:
-        log.info(f"splitting {border} at {entry_point} and {exit_point}")
-        split_border = shapely.ops.split(border, entry_point)
-        assert len(split_border.geoms) == 2, (
-            f"failed to split {border} at {entry_point}"
-        )
-        return []
-
 
 INPUT_GEOMETRY_TYPES = [
     VertexInputGeometry,
@@ -142,26 +127,67 @@ INPUT_GEOMETRY_TYPES = [
 ]
 
 
-def row_filter(fp):
+def parse_geometry_definition_file(
+    path: str, providers: Dict[ProviderToken, Any]
+) -> geopandas.GeoDataFrame:
+    airspace_names = []
+    airspace_geometries = []
+    with open(path, "r") as definition_file:
+        reader = csv.DictReader(_row_filter(definition_file))
+        for row in reader:
+            airspace_names.append(row["name"])
+            airspace_geometries.append(_parse_polygon(row["geometry"], providers))
+    return geopandas.GeoDataFrame(
+        {"name": airspace_names, "geometry": airspace_geometries}, crs=CRS_WGS84
+    )
+
+
+def parse_vfr_reporting_points(path: str) -> geopandas.GeoDataFrame:
+    field_aerodrome = []
+    field_designator = []
+    field_geometry = []
+    field_compulsory = []
+    field_altitude_restriction = []
+    field_provenance = []
+    with open(path, "r") as reporting_points_file:
+        reader = csv.DictReader(_row_filter(reporting_points_file))
+        for row in reader:
+            field_aerodrome.append(row["aerodrome"])
+            field_designator.append(row["designator"])
+            field_geometry.append(_parse_point(row["geometry"]))
+            field_compulsory.append(row["compulsory"])
+            field_altitude_restriction.append(
+                _parse_altitude_restriction(row["altitude_restriction"])
+            )
+            field_provenance.append(row["provenance"])
+    return geopandas.GeoDataFrame(
+        {
+            "aerodrome": field_aerodrome,
+            "designator": field_designator,
+            "geometry": field_geometry,
+            "compulsory": field_compulsory,
+            "altitude_restriction": field_altitude_restriction,
+            "provenance": field_provenance,
+        }
+    )
+
+
+def _row_filter(fp):
     for row in fp:
         if row.startswith("#"):
-            log.info(f'skipping line "{row}"')
+            log.info(f'skipping line "{row.strip()}"')
         else:
             log.debug(f'processing line "{row}')
             yield row
 
 
-def parse_geometry_definition_file(path: str, providers: Dict[ProviderToken, Any]):
-    airspace_names = []
-    airspace_geometries = []
-    with open(path, "r") as definition_file:
-        reader = csv.DictReader(row_filter(definition_file))
-        for row in reader:
-            airspace_names.append(row["name"])
-            airspace_geometries.append(_parse_polygon(row["geometry"], providers))
-    return geopandas.GeoDataFrame(
-        {"name": airspace_names, "geometry": airspace_geometries}, crs="EPSG:4326"
-    )
+def _parse_point(geometry: str) -> shapely.Point:
+    return shapely.Point(dms_string_to_decimal(geometry))
+
+
+def _parse_altitude_restriction(value: str) -> str:
+    # FIXME: Come up with a data model to properly represent restrictions.
+    return value
 
 
 def _parse_polygon(geometry: str, providers: Dict[ProviderToken, Any]):
