@@ -1,0 +1,10 @@
+aerodrome,designator,geometry,compulsory,altitude_restriction,provenance
+LSZB,N,47 04 28 N / 007 34 11 E,inbound_only,,LSZB AREA 24
+LSZB,E,47 00 17 N / 007 38 51 E,inbound_only,,LSZB AREA 24
+LSZB,E1,46 56 45 N / 007 32 51 E,yes,max 4500,LSZB AREA 24
+LSZB,Z,46 46 48 N / 007 36 12 E,inbound_only,,LSZB AREA 24
+LSZB,Z1,46 52 03 N / 007 32 52 E,inbound_only,max 4500,LSZB AREA 24
+LSZB,S,46 46 43 N / 007 30 38 E,inbound_only,min 3500,LSZB AREA 24
+LSZB,S1,46 51 23 N / 007 29 47 E,inbound_only,min 3500 max 4500,LSZB AREA 24
+LSZB,W,46 54 16 N / 007 15 43 E,inbound_only,,LSZB AREA 24
+LSZB,W1,46 55 57 N / 007 23 14 E,inbound_only,max 4500,LSZB AREA 24

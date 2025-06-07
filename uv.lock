@@ -13,8 +13,8 @@ resolution-markers = [
 
 [[package]]
 name = "aipbuilder"
-version = "0.1.0"
-source = { virtual = "." }
+version = "0.0.1"
+source = { editable = "." }
 dependencies = [
     { name = "folium" },
     { name = "geopandas" },
@@ -24,6 +24,11 @@ dependencies = [
     { name = "matplotlib" },
     { name = "pyproj" },
     { name = "ruff" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "aipbuilder" },
 ]
 
 [package.metadata]
@@ -37,6 +42,9 @@ requires-dist = [
     { name = "pyproj", specifier = ">=3.7.1" },
     { name = "ruff", specifier = ">=0.11.10" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "aipbuilder", editable = "." }]
 
 [[package]]
 name = "appnope"
