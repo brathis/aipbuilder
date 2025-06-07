@@ -94,9 +94,7 @@ class CircleInputGeometry(InputGeometry):
 
 
 class BorderInputGeometry(InputGeometry):
-    REGEX = re.compile(
-        r"^BORDER\((?P<borderName>[A-Z\+]+)(?P<invert>, I)?(?P<reverse>, R)?\)$"
-    )
+    REGEX = re.compile(r"^BORDER\((?P<borderName>[A-Z\+]+)(?P<invert>, I)?\)$")
 
     @classmethod
     def matches(cls, definition):
@@ -110,10 +108,12 @@ class BorderInputGeometry(InputGeometry):
         border_provider: BorderProvider = providers[ProviderToken.BORDER_PROVIDER]
         border = border_provider.get_border(match["borderName"])
         invert = match["invert"] is not None
-        reverse = match["reverse"] is not None
 
         border_segment = get_border_segment(
-            shapely.Point(previous), shapely.Point(subsequent), border, invert, reverse
+            shapely.Point(previous),
+            shapely.Point(subsequent),
+            border,
+            invert,
         )
         if border_segment is None:
             return []
