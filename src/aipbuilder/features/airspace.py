@@ -1,7 +1,6 @@
-import csv
 import logging
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Protocol, Tuple
 
 import geopandas
 import shapely
@@ -11,23 +10,23 @@ from aipbuilder.country_borders import get_border_segment
 from aipbuilder.crs import CRS_WGS84
 from aipbuilder.curved_geometries import arc_around_point, circle_around_point
 from aipbuilder.dms_to_decimal import (
+    dms_match_to_decimal,
     dms_string_to_decimal,
     dms_to_decimal,
     is_valid_dms_format,
 )
 from aipbuilder.providers import BorderProvider, ProviderToken
-
+from aipbuilder.util import get_csv_reader
 
 __all__ = [
-    "parse_geometry_definition_file",
-    "parse_vfr_reporting_points",
+    "parse_airspaces",
 ]
 
 
 log = logging.getLogger(__name__)
 
 
-class InputGeometry:
+class InputGeometry(Protocol):
     @classmethod
     def matches(definition: str) -> re.Match | None: ...
 
@@ -40,21 +39,21 @@ class InputGeometry:
     def can_process(previous, subsequent) -> bool: ...
 
 
-class VertexInputGeometry(InputGeometry):
+class VertexInputGeometry:
     @classmethod
     def matches(cls, definition):
         return is_valid_dms_format(definition)
 
     @classmethod
     def parse(cls, match, previous, subsequent, providers):
-        return [dms_to_decimal(match)]
+        return [dms_match_to_decimal(match)]
 
     @classmethod
     def can_process(cls, previous, subsequent):
         return True
 
 
-class ArcInputGeometry(InputGeometry):
+class ArcInputGeometry:
     REGEX = re.compile(
         r"^ARC\((?P<center>[\d NSEW/\.]+), (?P<radiusNm>[\d\.]+), (?P<direction>cw|ccw)\)$"
     )
@@ -75,7 +74,7 @@ class ArcInputGeometry(InputGeometry):
         return previous is not None and subsequent is not None
 
 
-class CircleInputGeometry(InputGeometry):
+class CircleInputGeometry:
     REGEX = re.compile(r"^CIRCLE\((?P<center>[\d NSEW/]+), (?P<radiusNm>[\d\.]+)\)$")
 
     @classmethod
@@ -93,7 +92,7 @@ class CircleInputGeometry(InputGeometry):
         return True
 
 
-class BorderInputGeometry(InputGeometry):
+class BorderInputGeometry:
     REGEX = re.compile(r"^BORDER\((?P<borderName>[A-Z\+]+)(?P<invert>, I)?\)$")
 
     @classmethod
@@ -125,79 +124,43 @@ class BorderInputGeometry(InputGeometry):
         return previous is not None and subsequent is not None
 
 
-INPUT_GEOMETRY_TYPES = [
-    VertexInputGeometry,
-    ArcInputGeometry,
-    CircleInputGeometry,
-    BorderInputGeometry,
-]
+DEFAULT_INPUT_GEOMETRY_TYPES = {
+    "vertex": VertexInputGeometry,
+    "circle": CircleInputGeometry,
+    "arc": ArcInputGeometry,
+    "border": BorderInputGeometry,
+}
 
 
-def parse_geometry_definition_file(
-    path: str, providers: Dict[ProviderToken, Any]
+def parse_airspaces(
+    path: str,
+    providers: Dict[ProviderToken, Any],
+    input_geometry_overrides: Dict[str, InputGeometry] | None = None,
 ) -> geopandas.GeoDataFrame:
     airspace_names = []
     airspace_geometries = []
     with open(path, "r") as definition_file:
-        reader = csv.DictReader(_row_filter(definition_file))
+        reader = get_csv_reader(definition_file)
         for row in reader:
+            log.info(f"Parsing airspace {row['name']}")
             airspace_names.append(row["name"])
-            airspace_geometries.append(_parse_polygon(row["geometry"], providers))
+            airspace_geometries.append(
+                _parse_polygon_definition(
+                    row["geometry"], providers, input_geometry_overrides
+                )
+            )
     return geopandas.GeoDataFrame(
         {"name": airspace_names, "geometry": airspace_geometries}, crs=CRS_WGS84
     )
 
 
-def parse_vfr_reporting_points(path: str) -> geopandas.GeoDataFrame:
-    field_aerodrome = []
-    field_designator = []
-    field_geometry = []
-    field_compulsory = []
-    field_altitude_restriction = []
-    field_provenance = []
-    with open(path, "r") as reporting_points_file:
-        reader = csv.DictReader(_row_filter(reporting_points_file))
-        for row in reader:
-            field_aerodrome.append(row["aerodrome"])
-            field_designator.append(row["designator"])
-            field_geometry.append(_parse_point(row["geometry"]))
-            field_compulsory.append(row["compulsory"])
-            field_altitude_restriction.append(
-                _parse_altitude_restriction(row["altitude_restriction"])
-            )
-            field_provenance.append(row["provenance"])
-    return geopandas.GeoDataFrame(
-        {
-            "aerodrome": field_aerodrome,
-            "designator": field_designator,
-            "geometry": field_geometry,
-            "compulsory": field_compulsory,
-            "altitude_restriction": field_altitude_restriction,
-            "provenance": field_provenance,
-        }
-    )
-
-
-def _row_filter(fp):
-    for row in fp:
-        if row.startswith("#"):
-            log.info(f'skipping line "{row.strip()}"')
-        else:
-            log.debug(f'processing line "{row}')
-            yield row
-
-
-def _parse_point(geometry: str) -> shapely.Point:
-    return shapely.Point(dms_string_to_decimal(geometry))
-
-
-def _parse_altitude_restriction(value: str) -> str:
-    # FIXME: Come up with a data model to properly represent restrictions.
-    return value
-
-
-def _parse_polygon(geometry: str, providers: Dict[ProviderToken, Any]):
+def _parse_polygon_definition(
+    geometry: str,
+    providers: Dict[ProviderToken, Any],
+    input_geometry_overrides: Dict[str, InputGeometry] | None,
+):
     geometry_components = geometry.split(" - ")
+    input_geometry_types = [None for _ in range(len(geometry_components))]
     vertices = [None for _ in range(len(geometry_components))]
     component_indices_to_process = list(range(len(geometry_components)))
     while len(component_indices_to_process):
@@ -211,39 +174,80 @@ def _parse_polygon(geometry: str, providers: Dict[ProviderToken, Any]):
             previous_vertex = previous_vertices[-1] if previous_vertices else None
             subsequent_vertices = vertices[(i + 1) % len(geometry_components)]
             subsequent_vertex = subsequent_vertices[0] if subsequent_vertices else None
-            component_vertices = _parse_geometry_component(
-                component, previous_vertex, subsequent_vertex, providers
+            input_geometry_type, component_vertices = _parse_polygon_component(
+                component,
+                previous_vertex,
+                subsequent_vertex,
+                providers,
+                input_geometry_overrides,
             )
             if component_vertices is not None:
                 component_indices_to_process.remove(i)
+                input_geometry_types[i] = input_geometry_type
                 vertices[i] = component_vertices
         len_after_iteration = len(component_indices_to_process)
         if len_before_iteration == len_after_iteration:
             raise RuntimeError(
                 f"no progress made with {len_before_iteration} components remaining"
             )
-    return Polygon(shell=_flatten_vertices(vertices))
+    return Polygon(shell=_flatten_vertices(vertices, input_geometry_types))
 
 
-def _parse_geometry_component(component: str, previous, subsequent, providers):
+def _parse_polygon_component(
+    component: str,
+    previous,
+    subsequent,
+    providers,
+    input_geometry_overrides: Dict[str, InputGeometry] | None,
+) -> Tuple[str, List[Tuple[float, float]]]:
     log.debug(
         f'parsing component "{component}" with previous "{previous}" and subsequent "{subsequent}"'
     )
-    for input_type in INPUT_GEOMETRY_TYPES:
+    for input_type_name, input_type in _get_input_geometry_types(
+        input_geometry_overrides
+    ).items():
         if match := input_type.matches(component):
             if not input_type.can_process(previous, subsequent):
                 log.debug(
                     f"skipping processing of component {component} because it cannot be processed"
                 )
-                return None
-            return input_type.parse(match, previous, subsequent, providers)
+                return None, None
+            return input_type_name, input_type.parse(
+                match, previous, subsequent, providers
+            )
     raise ValueError(
         f'no input geometry type matches component "{component}", skipping'
     )
 
 
-def _flatten_vertices(vertices):
+def _flatten_vertices(vertices, input_geometry_types):
     flattened = []
-    for v in vertices:
-        flattened.extend(v)
+    border_entry_point_indices = _get_border_entry_point_indices(input_geometry_types)
+    for i, v in enumerate(vertices):
+        # border entry vertices are already part of the border segment linestring
+        if i not in border_entry_point_indices:
+            flattened.extend(v)
     return flattened
+
+
+def _get_border_entry_point_indices(input_geometry_types):
+    border_indices = [
+        i
+        for i in range(len(input_geometry_types))
+        if input_geometry_types[i] == "border"
+    ]
+    border_entry_point_indices = set()
+    for b in border_indices:
+        border_entry_point_indices.add(b - 1)
+        border_entry_point_indices.add(b + 1)
+    for bi in border_entry_point_indices:
+        assert input_geometry_types[bi] == "vertex"
+    return border_entry_point_indices
+
+
+def _get_input_geometry_types(
+    input_geometry_overrides: Dict[str, InputGeometry] | None = None,
+):
+    if not input_geometry_overrides:
+        return DEFAULT_INPUT_GEOMETRY_TYPES
+    return {**DEFAULT_INPUT_GEOMETRY_TYPES, **input_geometry_overrides}
