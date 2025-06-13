@@ -1,55 +1,73 @@
 import logging
 import re
-from typing import Any, Dict, List, Protocol, Tuple
+from typing import Dict, List, Protocol, Tuple, runtime_checkable
 
-import geopandas
 import shapely
-from shapely import Polygon
 
-from aipbuilder.country_borders import get_border_segment
-from aipbuilder.crs import CRS_WGS84
-from aipbuilder.curved_geometries import arc_around_point, circle_around_point
-from aipbuilder.dms_to_decimal import (
-    dms_match_to_decimal,
-    dms_string_to_decimal,
-    dms_to_decimal,
+from airspace_renderer.country_borders import get_border_segment
+from airspace_renderer.curved_geometries import arc_around_point, circle_around_point
+from airspace_renderer.dms_to_decimal import (
+    dms_match_to_point,
+    dms_string_to_point,
     is_valid_dms_format,
 )
-from aipbuilder.providers import BorderProvider, ProviderToken
-from aipbuilder.util import get_csv_reader
 
 __all__ = [
-    "parse_airspaces",
+    "BorderProvider",
+    "parse_polygon",
 ]
 
 
 log = logging.getLogger(__name__)
 
 
+@runtime_checkable
+class BorderProvider(Protocol):
+    def get_border(self, border_name: str) -> shapely.LineString: ...
+
+
 class InputGeometry(Protocol):
     @classmethod
-    def matches(definition: str) -> re.Match | None: ...
+    def matches(cls, definition: str) -> re.Match | None: ...
 
     @classmethod
     def parse(
-        match: re.Match, previous, subsequent, providers
+        cls,
+        match: re.Match,
+        previous: Tuple[float, float] | None,
+        subsequent: Tuple[float, float] | None,
+        border_provider: BorderProvider,
     ) -> List[Tuple[float, float]]: ...
 
     @classmethod
-    def can_process(previous, subsequent) -> bool: ...
+    def can_process(
+        cls,
+        previous: Tuple[float, float] | None,
+        subsequent: Tuple[float, float] | None,
+    ) -> bool: ...
 
 
 class VertexInputGeometry:
     @classmethod
-    def matches(cls, definition):
+    def matches(cls, definition: str) -> re.Match | None:
         return is_valid_dms_format(definition)
 
     @classmethod
-    def parse(cls, match, previous, subsequent, providers):
-        return [dms_match_to_decimal(match)]
+    def parse(
+        cls,
+        match: re.Match,
+        previous: Tuple[float, float] | None,
+        subsequent: Tuple[float, float] | None,
+        border_provider: BorderProvider,
+    ) -> List[Tuple[float, float]]:
+        return [dms_match_to_point(match)]
 
     @classmethod
-    def can_process(cls, previous, subsequent):
+    def can_process(
+        cls,
+        previous: Tuple[float, float] | None,
+        subsequent: Tuple[float, float] | None,
+    ) -> bool:
         return True
 
 
@@ -59,18 +77,28 @@ class ArcInputGeometry:
     )
 
     @classmethod
-    def matches(cls, definition):
+    def matches(cls, definition: str) -> re.Match | None:
         return cls.REGEX.fullmatch(definition)
 
     @classmethod
-    def parse(cls, match, previous, subsequent, providers):
-        center = dms_string_to_decimal(match["center"])
+    def parse(
+        cls,
+        match: re.Match,
+        previous: Tuple[float, float] | None,
+        subsequent: Tuple[float, float] | None,
+        border_provider: BorderProvider,
+    ) -> List[Tuple[float, float]]:
+        center = dms_string_to_point(match["center"])
         radius_nm = float(match["radiusNm"])
         direction = match["direction"]
         return arc_around_point(center, previous, subsequent, radius_nm, direction, 100)
 
     @classmethod
-    def can_process(cls, previous, subsequent):
+    def can_process(
+        cls,
+        previous: Tuple[float, float] | None,
+        subsequent: Tuple[float, float] | None,
+    ) -> bool:
         return previous is not None and subsequent is not None
 
 
@@ -78,17 +106,27 @@ class CircleInputGeometry:
     REGEX = re.compile(r"^CIRCLE\((?P<center>[\d NSEW/]+), (?P<radiusNm>[\d\.]+)\)$")
 
     @classmethod
-    def matches(cls, definition):
+    def matches(cls, definition: str) -> re.Match | None:
         return cls.REGEX.fullmatch(definition)
 
     @classmethod
-    def parse(cls, match, previous, subsequent, providers):
-        center = dms_string_to_decimal(match["center"])
+    def parse(
+        cls,
+        match: re.Match,
+        previous: Tuple[float, float] | None,
+        subsequent: Tuple[float, float] | None,
+        border_provider: BorderProvider,
+    ) -> List[Tuple[float, float]]:
+        center = dms_string_to_point(match["center"])
         radius_nm = float(match["radiusNm"])
         return circle_around_point(center, radius_nm, 100)
 
     @classmethod
-    def can_process(cls, previous, subsequent):
+    def can_process(
+        cls,
+        previous: Tuple[float, float] | None,
+        subsequent: Tuple[float, float] | None,
+    ) -> bool:
         return True
 
 
@@ -96,15 +134,17 @@ class BorderInputGeometry:
     REGEX = re.compile(r"^BORDER\((?P<borderName>[A-Z\+]+)(?P<invert>, I)?\)$")
 
     @classmethod
-    def matches(cls, definition):
+    def matches(cls, definition: str) -> re.Match | None:
         return cls.REGEX.fullmatch(definition)
 
     @classmethod
-    def parse(cls, match, previous, subsequent, providers):
-        assert ProviderToken.BORDER_PROVIDER in providers, (
-            f"error parsing {match}, missing BORDER_PROVIDER, providers: {providers}"
-        )
-        border_provider: BorderProvider = providers[ProviderToken.BORDER_PROVIDER]
+    def parse(
+        cls,
+        match: re.Match,
+        previous: Tuple[float, float] | None,
+        subsequent: Tuple[float, float] | None,
+        border_provider: BorderProvider,
+    ) -> List[Tuple[float, float]]:
         border = border_provider.get_border(match["borderName"])
         invert = match["invert"] is not None
 
@@ -117,14 +157,18 @@ class BorderInputGeometry:
         if border_segment is None:
             return []
 
-        return border_segment.coords
+        return [(c[0], c[1]) for c in border_segment.coords]
 
     @classmethod
-    def can_process(cls, previous, subsequent):
+    def can_process(
+        cls,
+        previous: Tuple[float, float] | None,
+        subsequent: Tuple[float, float] | None,
+    ) -> bool:
         return previous is not None and subsequent is not None
 
 
-DEFAULT_INPUT_GEOMETRY_TYPES = {
+DEFAULT_INPUT_GEOMETRY_TYPES: Dict[str, InputGeometry] = {
     "vertex": VertexInputGeometry,
     "circle": CircleInputGeometry,
     "arc": ArcInputGeometry,
@@ -132,36 +176,19 @@ DEFAULT_INPUT_GEOMETRY_TYPES = {
 }
 
 
-def parse_airspaces(
-    path: str,
-    providers: Dict[ProviderToken, Any],
-    input_geometry_overrides: Dict[str, InputGeometry] | None = None,
-) -> geopandas.GeoDataFrame:
-    airspace_names = []
-    airspace_geometries = []
-    with open(path, "r") as definition_file:
-        reader = get_csv_reader(definition_file)
-        for row in reader:
-            log.info(f"Parsing airspace {row['name']}")
-            airspace_names.append(row["name"])
-            airspace_geometries.append(
-                _parse_polygon_definition(
-                    row["geometry"], providers, input_geometry_overrides
-                )
-            )
-    return geopandas.GeoDataFrame(
-        {"name": airspace_names, "geometry": airspace_geometries}, crs=CRS_WGS84
-    )
-
-
-def _parse_polygon_definition(
+def parse_polygon(
     geometry: str,
-    providers: Dict[ProviderToken, Any],
-    input_geometry_overrides: Dict[str, InputGeometry] | None,
-):
-    geometry_components = geometry.split(" - ")
-    input_geometry_types = [None for _ in range(len(geometry_components))]
-    vertices = [None for _ in range(len(geometry_components))]
+    border_provider: BorderProvider,
+    input_geometry_overrides: Dict[str, InputGeometry] | None = None,
+) -> shapely.Polygon:
+    log.debug(f'parsing geometry "{geometry}"')
+    geometry_components: List[str] = geometry.split(" - ")
+    input_geometry_types: List[str | None] = [
+        None for _ in range(len(geometry_components))
+    ]
+    vertices: List[List[Tuple[float, float]] | None] = [
+        None for _ in range(len(geometry_components))
+    ]
     component_indices_to_process = list(range(len(geometry_components)))
     while len(component_indices_to_process):
         log.debug(
@@ -178,7 +205,7 @@ def _parse_polygon_definition(
                 component,
                 previous_vertex,
                 subsequent_vertex,
-                providers,
+                border_provider,
                 input_geometry_overrides,
             )
             if component_vertices is not None:
@@ -190,16 +217,16 @@ def _parse_polygon_definition(
             raise RuntimeError(
                 f"no progress made with {len_before_iteration} components remaining"
             )
-    return Polygon(shell=_flatten_vertices(vertices, input_geometry_types))
+    return shapely.Polygon(shell=_flatten_vertices(vertices, input_geometry_types))
 
 
 def _parse_polygon_component(
     component: str,
-    previous,
-    subsequent,
-    providers,
+    previous: Tuple[float, float] | None,
+    subsequent: Tuple[float, float] | None,
+    border_provider: BorderProvider,
     input_geometry_overrides: Dict[str, InputGeometry] | None,
-) -> Tuple[str, List[Tuple[float, float]]]:
+) -> Tuple[str, List[Tuple[float, float]]] | Tuple[None, None]:
     log.debug(
         f'parsing component "{component}" with previous "{previous}" and subsequent "{subsequent}"'
     )
@@ -213,7 +240,7 @@ def _parse_polygon_component(
                 )
                 return None, None
             return input_type_name, input_type.parse(
-                match, previous, subsequent, providers
+                match, previous, subsequent, border_provider
             )
     raise ValueError(
         f'no input geometry type matches component "{component}", skipping'
@@ -246,8 +273,8 @@ def _get_border_entry_point_indices(input_geometry_types):
 
 
 def _get_input_geometry_types(
-    input_geometry_overrides: Dict[str, InputGeometry] | None = None,
-):
+    input_geometry_overrides: Dict[str, InputGeometry] | None,
+) -> Dict[str, InputGeometry]:
     if not input_geometry_overrides:
         return DEFAULT_INPUT_GEOMETRY_TYPES
     return {**DEFAULT_INPUT_GEOMETRY_TYPES, **input_geometry_overrides}

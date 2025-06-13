@@ -9,8 +9,5 @@ wheels/
 # Virtual environments
 .venv
 
-# AIP input data
-data/
-
 # WSL stuff
 *:Zone.Identifier

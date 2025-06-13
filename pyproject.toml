@@ -1,22 +1,13 @@
 [project]
-name = "aipbuilder"
+name = "airspace_renderer"
 version = "0.0.1"
-description = "A tool for building geospatial datasets from textual aeronautical information publications (AIPs)."
+description = "A Python library for turning textual description of airspace geometries into machine-readable geospatial data"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "folium>=0.19.6",
-    "geopandas>=1.0.1",
-    "ipykernel>=6.29.5",
-    "isort>=6.0.1",
-    "mapclassify>=2.8.1",
-    "matplotlib>=3.10.3",
     "pyproj>=3.7.1",
-    "ruff>=0.11.10",
+    "shapely>=2.1.1",
 ]
-
-[project.scripts]
-list-border-entry-points = "aipbuilder.tools.list_border_entry_points:entrypoint"
 
 [build-system]
 requires = ["hatchling"]
@@ -24,8 +15,15 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
-    "aipbuilder",
+    "airspace_renderer",
+    "folium>=0.19.7",
+    "geopandas>=1.1.0",
+    "isort>=6.0.1",
+    "mypy>=1.16.0",
+    "ruff>=0.11.10",
+    "types-geopandas>=1.0.1.20250601",
+    "types-shapely>=2.1.0.20250512",
 ]
 
 [tool.uv.sources]
-aipbuilder = { workspace = true }
+airspace_renderer = { workspace = true }

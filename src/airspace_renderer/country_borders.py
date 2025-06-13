@@ -1,13 +1,12 @@
 import functools
 import logging
-from typing import Dict, List, Tuple
+from typing import List, Tuple
 
-from aipbuilder.crs import CRS_WGS84
-from aipbuilder.util import force_tuple, get_distance_m
-import geopandas
 import shapely
 
-__all__ = ["get_border_segment", "compose_borders_from_gdf"]
+from airspace_renderer.util import force_tuple, get_distance_m
+
+__all__ = ["get_border_segment"]
 
 
 log = logging.getLogger(__name__)
@@ -114,26 +113,3 @@ def _assert_points_close_enough(
         raise ValueError(
             f"entry point {entry_point} is too far from closest border point {border_point}, dist={d:.1f}m, tolerance={tolerance_m:.1f}m"
         )
-
-
-def _join_coords_to_linestring(coords):
-    all_coords = []
-    for coord in coords:
-        all_coords.extend(coord)
-    return shapely.LineString(all_coords)
-
-
-def compose_borders_from_gdf(
-    gdf: geopandas.GeoDataFrame, compositions: Dict[str, List[Tuple[str, slice]]]
-):
-    out = {}
-    for composition_name, composition in compositions.items():
-        out[composition_name] = []
-        for composition_item in composition:
-            segment_name, segment_slice = composition_item
-            segment = gdf.loc[gdf.name == segment_name].iloc[0].geometry
-            out[composition_name].append(segment.coords[segment_slice])
-        out[composition_name] = _join_coords_to_linestring(out[composition_name])
-    return geopandas.GeoDataFrame(
-        {"name": out.keys(), "geometry": out.values()}, crs=CRS_WGS84
-    )

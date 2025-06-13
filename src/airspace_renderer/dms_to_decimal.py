@@ -1,12 +1,11 @@
 import re
 from typing import Tuple
 
-
 __all__ = [
     "is_valid_dms_format",
-    "dms_string_to_decimal",
+    "dms_string_to_point",
     "dms_to_decimal",
-    "dms_match_to_decimal",
+    "dms_match_to_point",
 ]
 
 
@@ -19,14 +18,14 @@ def is_valid_dms_format(dms: str) -> re.Match | None:
     return _REGEX.fullmatch(dms)
 
 
-def dms_string_to_decimal(dms: str) -> Tuple[float, float]:
+def dms_string_to_point(dms: str) -> Tuple[float, float]:
     match = _REGEX.fullmatch(dms)
     if not match:
         raise ValueError(f'invalid value "{dms}"')
-    return dms_match_to_decimal(match)
+    return dms_match_to_point(match)
 
 
-def dms_match_to_decimal(match: re.Match) -> Tuple[float, float]:
+def dms_match_to_point(match: re.Match) -> Tuple[float, float]:
     x = dms_to_decimal(
         int(match["degLon"]), int(match["minLon"]), float(match["secLon"])
     ) * (1 if match["hemLon"] == "E" else -1)
